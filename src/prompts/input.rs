@@ -45,6 +45,7 @@ pub struct Input<'a, T> {
     initial_text: Option<String>,
     theme: &'a dyn Theme,
     permit_empty: bool,
+    keep_input: bool,
     validator: Option<Box<dyn FnMut(&T) -> Option<String> + 'a>>,
     #[cfg(feature = "history")]
     history: Option<&'a mut dyn History<T>>,
@@ -102,6 +103,14 @@ impl<T> Input<'_, T> {
         self
     }
 
+    /// Indicates whether to keep the input value after validation.
+    ///
+    /// The default is to clear the input value after validation.
+    pub fn keep_input(&mut self, val: bool) -> &mut Self {
+        self.keep_input = val;
+        self
+    }
+
     /// Disables or enables the default value display.
     ///
     /// The default behaviour is to append [`default`](#method.default) to the prompt to tell the
@@ -122,6 +131,7 @@ impl<'a, T> Input<'a, T> {
             report: true,
             default: None,
             show_default: true,
+            keep_input: false,
             initial_text: None,
             theme,
             permit_empty: false,
@@ -258,6 +268,7 @@ where
     /// Like [`interact_text`](#method.interact_text) but allows a specific terminal to be set.
     pub fn interact_text_on(&mut self, term: &Term) -> io::Result<T> {
         let mut render = TermThemeRenderer::new(term, self.theme);
+        let mut input: String = String::new();
 
         loop {
             let default_string = self.default.as_ref().map(ToString::to_string);
@@ -288,6 +299,12 @@ where
                 position = chars.len();
             }
 
+            if self.keep_input {
+                term.write_str(input.as_str())?;
+                chars = input.chars().collect();
+                position = chars.len();
+            }
+
             loop {
                 match term.read_key()? {
                     Key::Backspace if position > 0 => {
@@ -313,9 +330,19 @@ where
                         term.move_cursor_left(tail.len() - 1)?;
                         term.flush()?;
                     }
+                    Key::Home if position > 0 => {
+                        term.move_cursor_left(position)?;
+                        position = 0;
+                        term.flush()?;
+                    }
                     Key::ArrowLeft if position > 0 => {
                         term.move_cursor_left(1)?;
                         position -= 1;
+                        term.flush()?;
+                    }
+                    Key::End if position < chars.len() => {
+                        term.move_cursor_right(chars.len()-position)?;
+                        position = chars.len();
                         term.flush()?;
                     }
                     Key::ArrowRight if position < chars.len() => {
@@ -399,7 +426,7 @@ where
                     _ => (),
                 }
             }
-            let input = chars.iter().collect::<String>();
+            input = chars.iter().collect::<String>();
 
             term.clear_line()?;
             render.clear()?;
